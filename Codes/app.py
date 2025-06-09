@@ -1,72 +1,107 @@
 import tkinter as tk
-import customtkinter as ctk 
+import custom tkinter as ctk
 import os
 from PIL import Image, ImageTk
-from authtoken import auth_token
-
+from datetime import datetime
 import torch
 from torch import autocast
-from diffusers import StableDiffusionPipeline 
+from diffusers import StableDiffusionPipeline
+from authtoken import auth_token
 
-# Create the app
-app = tk.Tk()
-app.geometry("1000x660")
-app.title("Stable Diffusion guidance scale testing") 
-ctk.set_appearance_mode("dark") 
+# Initial settings
+device = "cuda" if torch.cuda.is_available() else "cpu"
+pipeline = StableDiffusionPipeline.from_pretrained( 
+"CompVis/stable-diffusion-v1-4", 
+revision="fp16" if device == "cuda" else "fp32", 
+torch_dtype=torch.float16 if device == "cuda" else torch.float32, 
+use_auth_token=auth_token
+).to(device)
 
-G_SCALES = [7, 14, 20]
-root_path = "C:\PyProjects\StableDiffusion\images"
+# GUI
+app = ctk.CTk()
+app.geometry("1024x800")
+app.title("Stable Diffusion Advanced GUI")
+ctk.set_appearance_mode("dark")
 
-img1 = Image.open(os.path.join(root_path, "robotic bird_7.png"))
-img2 = Image.open(os.path.join(root_path, "robotic bird_16.png"))
-img3 = Image.open(os.path.join(root_path, "robotic bird_20.png"))
-h = 300
-w1 = int((h/img1.size[1])*img1.size[0])
-w2 = int((h/img2.size[1])*img2.size[0])
-w3 = int((h/img3.size[1])*img3.size[0])
-img1 = img1.resize((w1, h), Image.ANTIALIAS)
-img2 = img2.resize((w2, h), Image.ANTIALIAS)
-img3 = img3.resize((w3, h), Image.ANTIALIAS)
-generated_images = [img1, img2, img3]
-prompt = ctk.CTkEntry(height=40, width=512, text_font=("Arial", 20), text_color="black", fg_color="white") 
-prompt.place(x=220, y=30)
-
-lmain1 = ctk.CTkLabel(height=512, width=300)
-lmain1.place(x=10, y=110)
-lmain2 = ctk.CTkLabel(height=512, width=300)
-lmain2.place(x=320, y=110)
-lmain3 = ctk.CTkLabel(height=512, width=300)
-lmain3.place(x=630, y=110)
-label1 = ctk.CTkLabel(text=f"Guidance Scale: {str(G_SCALES[0])}", text_font=("Arial", 14), text_color="blue")
-label1.place(x=30, y=540)
-label2 = ctk.CTkLabel(text=f"Guidance Scale: {str(G_SCALES[1])}", text_font=("Arial", 14), text_color="blue")
-label2.place(x=340, y=540)
-label3 = ctk.CTkLabel(text=f"Guidance Scale: {str(G_SCALES[2])}", text_font=("Arial", 14), text_color="blue")
-label3.place(x=650, y=540)
-
-modelid = "CompVis/stable-diffusion-v1-4"
-device = "cpu"
-pipe = StableDiffusionPipeline.from_pretrained(modelid, revision="fp16", torch_dtype=torch.float16, use_auth_token=auth_token) 
-pipe.to(device) 
-
+# Image generation function
 def generate(): 
-    with autocast(device): 
-        g_prompt = prompt.get()
-        generated_images = [pipe(g_prompt, guidance_scale=g_scale)["sample"][0] for g_scale in G_SCALES]
-                
-        photo_images = []
-        for i, image in enumerate(generated_images):    
-            photo_image = ImageTk.PhotoImage(image)
-            photo_images.append(photo_image)
-            if i == 0:
-                lmain1.configure(image=photo_image)
-            elif i == 1:
-                lmain2.configure(image=photo_image)
-            elif i == 2:
-                lmain3.configure(image=photo_image)
+try: 
+prompt = prompt_entry.get() 
+g_scale = float(scale_entry.get()) 
+steps = int(steps_entry.get()) 
+seed = int(seed_entry.get()) 
+filename = filename_entry.get() or datetime.now().strftime("%Y%m%d_%H%M%S") 
+resolution = resolution_option.get() 
 
-trigger = ctk.CTkButton(height=40, width=120, text_font=("Arial", 20), text_color="white", fg_color="blue") 
-trigger.configure(text="Generate") 
-trigger.place(x=406, y=80) 
+width, height = map(int, resolution.split("x")) 
 
+status_label.configure(text="Generating image...", text_color="yellow") 
+app.update() 
+
+generator = torch.manual_seed(seed) 
+with autocast(device): 
+image = pipeline(prompt, guidance_scale=g_scale, num_inference_steps=steps, generator=generator).images[0] 
+
+os.makedirs("output_images", exist_ok=True) 
+full_path = f"output_images/{filename}.png" 
+image.save(full_path) 
+
+# Display 
+img_resized = image.resize((512, 512)) 
+img_tk = ImageTk.PhotoImage(img_resized) 
+image_label.configure(image=img_tk) 
+image_label.image = img_tk 
+
+# Save history 
+with open("output_images/history.txt", "a", encoding="utf-8") as f: 
+f.write(f"[{datetime.now()}] Prompt: {prompt} | File: {full_path}\n") 
+
+status_label.configure(text=" ✅ Image generated successfully!", text_color="lightgreen") 
+
+except Exception as e: 
+status_label.configure(text=f"❌ Error: {str(e)}", text_color="red")
+
+# Load the last generated image
+def load_last_image(): 
+try: 
+files = [f for f in os.listdir("output_images") if f.endswith(".png")] 
+files.sort(reverse=True) 
+if files: 
+img = Image.open(os.path.join("output_images", files[0])).resize((512, 512)) 
+img_tk = ImageTk.PhotoImage(img) 
+image_label.configure(image=img_tk) 
+image_label.image = img_tk 
+except: 
+pass
+
+# Widgets
+prompt_entry = ctk.CTkEntry(app, width=600, height=40, placeholder_text="Enter your prompt...")
+prompt_entry.pack(paddy=20)
+
+filename_entry = ctk.CTkEntry(app, width=300, placeholder_text="Save file as (optional)")
+filename_entry.pack(paddy=5)
+
+scale_entry = ctk.CTkEntry(app, width=200, placeholder_text="Guidance Scale (e.g. 7.5)")
+scale_entry.pack(paddy=5)
+
+steps_entry = ctk.CTkEntry(app, width=200, placeholder_text="Inference Steps (e.g. 50)")
+steps_entry.pack(paddy=5)
+
+seed_entry = ctk.CTkEntry(app, width=200, placeholder_text="Seed (e.g. 42)")
+seed_entry.pack(paddy=5)
+
+resolution_option = ctk.CTkOptionMenu(app, values=["512x512", "768x512", "768x768"])
+resolution_option.set("512x512")
+resolution_option.pack(paddy=10)
+
+generate_button = ctk.CTkButton(app, text="🎨 Generate Image", command=generate)
+generate_button.pack(paddy=15)
+
+status_label = ctk.CTkLabel(app, text="", text_color="white")
+status_label.pack(paddy=5)
+
+image_label = ctk.CTkLabel(app, text="")
+image_label.pack(paddy=10)
+
+load_last_image()
 app.mainloop()
